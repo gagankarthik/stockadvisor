@@ -39,16 +39,17 @@ terraform init
 terraform apply -var image_tag=$(git rev-parse --short HEAD)
 ```
 
-`apply` builds and pushes both images, then stands up the stack. On completion:
+`apply` builds and pushes the image, then stands up the stack. On completion:
 
 ```bash
-terraform output api_url        # -> set as NEXT_PUBLIC_API_BASE_URL in the UI
+terraform output api_url        # -> the UI's MARKETDESK_API_UPSTREAM (or NEXT_PUBLIC_API_BASE_URL)
 ```
 
-Seed the first snapshot (otherwise the API returns 503 until the schedule fires):
+Seed the first snapshot (otherwise the API returns 503 until the schedule fires).
+The API and refresh share one function; trigger the refresh path explicitly:
 
 ```bash
-aws lambda invoke --function-name marketdesk-train /dev/stdout
+aws lambda invoke --function-name marketdesk-api --payload '{"job":"refresh"}' --cli-binary-format raw-in-base64-out /dev/stdout
 ```
 
 ## Updating

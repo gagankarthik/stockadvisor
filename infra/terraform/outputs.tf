@@ -11,7 +11,3 @@ output "artifact_bucket" {
 output "ecr_api_repo" {
   value = aws_ecr_repository.api.repository_url
 }
-
-output "ecr_train_repo" {
-  value = aws_ecr_repository.train.repository_url
-}

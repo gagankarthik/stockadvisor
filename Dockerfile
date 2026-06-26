@@ -1,4 +1,6 @@
-# MarketDesk API — AWS Lambda container image (FastAPI via Mangum).
+# MarketDesk — single AWS Lambda container image (FastAPI via Mangum + the
+# scheduled refresh job). The handler in api/handler.py dispatches by event:
+# HTTP requests -> FastAPI, EventBridge schedule -> train.lambda_handler.
 #
 # Build & deploy:
 #   aws ecr get-login-password | docker login --username AWS --password-stdin <acct>.dkr.ecr.<region>.amazonaws.com
@@ -13,9 +15,11 @@ FROM public.ecr.aws/lambda/python:3.12
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -t "${LAMBDA_TASK_ROOT}"
 
-# Application code.
+# Application code: the API, the shared library, and the training entry point
+# (imported by the handler for scheduled refreshes).
 COPY marketdesk ${LAMBDA_TASK_ROOT}/marketdesk
 COPY api ${LAMBDA_TASK_ROOT}/api
+COPY train.py ${LAMBDA_TASK_ROOT}/train.py
 
 # Lambda handler: module.function
 CMD [ "api.handler.handler" ]

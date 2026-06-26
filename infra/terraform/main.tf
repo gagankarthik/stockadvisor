@@ -5,7 +5,6 @@ locals {
   ecr_host    = "${local.account_id}.dkr.ecr.${var.region}.amazonaws.com"
   repo_root   = "${path.module}/../.."
   api_image   = "${aws_ecr_repository.api.repository_url}:${var.image_tag}"
-  train_image = "${aws_ecr_repository.train.repository_url}:${var.image_tag}"
   common_env = {
     MARKETDESK_ARTIFACT_URI = "s3://${aws_s3_bucket.artifacts.bucket}/prod"
     FINNHUB_KEY             = var.finnhub_key
@@ -29,21 +28,13 @@ resource "aws_ecr_repository" "api" {
   tags = local.tags
 }
 
-resource "aws_ecr_repository" "train" {
-  name                 = "${var.project}-train"
-  image_tag_mutability = "MUTABLE"
-  force_delete         = true
-  image_scanning_configuration { scan_on_push = true }
-  tags = local.tags
-}
-
-# Build both images and push to ECR. Requires Docker + AWS CLI on the machine
-# running terraform (locally use Git Bash / WSL; in CI use a Linux runner).
+# Build the single image (serves both the API and the scheduled refresh) and
+# push to ECR. Requires Docker + AWS CLI on the machine running terraform
+# (locally use Git Bash / WSL; in CI use a Linux runner).
 resource "null_resource" "images" {
   triggers = {
     tag          = var.image_tag
     dockerfile   = filemd5("${local.repo_root}/Dockerfile")
-    dockerfile_t = filemd5("${local.repo_root}/Dockerfile.train")
     requirements = filemd5("${local.repo_root}/requirements.txt")
   }
 
@@ -54,14 +45,12 @@ resource "null_resource" "images" {
       set -euo pipefail
       aws ecr get-login-password --region ${var.region} \
         | docker login --username AWS --password-stdin ${local.ecr_host}
-      docker build -t ${local.api_image}   -f Dockerfile        .
+      docker build -t ${local.api_image} -f Dockerfile .
       docker push  ${local.api_image}
-      docker build -t ${local.train_image} -f Dockerfile.train  .
-      docker push  ${local.train_image}
     EOT
   }
 
-  depends_on = [aws_ecr_repository.api, aws_ecr_repository.train]
+  depends_on = [aws_ecr_repository.api]
 }
 
 # --------------------------------------------------------------------------- #
@@ -127,15 +116,17 @@ resource "aws_iam_role_policy" "lambda" {
 }
 
 # --------------------------------------------------------------------------- #
-# API Lambda (FastAPI via Mangum) + public Function URL                       #
+# Single Lambda: FastAPI via Mangum (public Function URL) + the scheduled      #
+# refresh. The handler dispatches by event type; sized for the heavy training  #
+# run so the one function covers both jobs.                                    #
 # --------------------------------------------------------------------------- #
 resource "aws_lambda_function" "api" {
   function_name = "${var.project}-api"
   role          = aws_iam_role.lambda.arn
   package_type  = "Image"
   image_uri     = local.api_image
-  memory_size   = var.api_memory_mb
-  timeout       = 30
+  memory_size   = var.train_memory_mb
+  timeout       = 900
   architectures = ["x86_64"]
 
   environment {
@@ -148,34 +139,15 @@ resource "aws_lambda_function" "api" {
   tags       = local.tags
 }
 
+# CORS is handled inside the app (FastAPI CORSMiddleware), so the Function URL
+# deliberately has no cors block — setting it in both places makes Lambda emit
+# duplicate Access-Control-Allow-Origin headers, which browsers reject.
 resource "aws_lambda_function_url" "api" {
   function_name      = aws_lambda_function.api.function_name
   authorization_type = "NONE"
-  cors {
-    allow_origins = [var.cors_origin]
-    allow_methods = ["*"]
-    allow_headers = ["*"]
-  }
 }
 
-# --------------------------------------------------------------------------- #
-# Training Lambda + daily EventBridge schedule                                #
-# --------------------------------------------------------------------------- #
-resource "aws_lambda_function" "train" {
-  function_name = "${var.project}-train"
-  role          = aws_iam_role.lambda.arn
-  package_type  = "Image"
-  image_uri     = local.train_image
-  memory_size   = var.train_memory_mb
-  timeout       = 900
-  architectures = ["x86_64"]
-
-  environment { variables = local.common_env }
-
-  depends_on = [null_resource.images, aws_iam_role_policy.lambda]
-  tags       = local.tags
-}
-
+# Daily EventBridge schedule -> the same function (dispatched to the refresh job).
 resource "aws_cloudwatch_event_rule" "refresh" {
   name                = "${var.project}-refresh"
   schedule_expression = var.refresh_schedule
@@ -184,13 +156,13 @@ resource "aws_cloudwatch_event_rule" "refresh" {
 
 resource "aws_cloudwatch_event_target" "refresh" {
   rule = aws_cloudwatch_event_rule.refresh.name
-  arn  = aws_lambda_function.train.arn
+  arn  = aws_lambda_function.api.arn
 }
 
 resource "aws_lambda_permission" "events" {
   statement_id  = "AllowEventBridge"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.train.function_name
+  function_name = aws_lambda_function.api.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.refresh.arn
 }

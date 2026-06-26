@@ -13,16 +13,19 @@ validation, and saved-plan performance tracking.
 
 ## Architecture
 
-Training is **decoupled** from serving — the future-proof pattern for ML on
-Lambda:
+Training stays **decoupled** from serving (heavy work runs on a schedule and
+writes a small artifact; requests stay fast) — but both run in **one Lambda**.
+The handler dispatches by event: an EventBridge schedule triggers the refresh
+job; HTTP requests from the Function URL go to FastAPI.
 
 ```
-                 (scheduled, heavy)                    (per request, fast)
- EventBridge ─▶ train.py / Lambda  ──writes──▶  S3 artifact store  ──reads──▶  API Lambda ─▶ API Gateway / Function URL
-                 • fetch ~500 tickers            • model.joblib                 • FastAPI + Mangum
-                 • train + calibrate model       • snapshot.json                • dashboard / screener
-                 • score the universe            • closes.pkl                   • allocation / stock detail
-                 • write snapshot                • model_history.json           • plans
+ ┌───────────────────────── one Lambda — handler dispatches by event ─────────────────────────┐
+ │                                                                                             │
+ │  EventBridge ─▶ train.py refresh ──writes──▶  S3 artifact store  ──reads──▶  FastAPI ─▶ Function URL
+ │  (scheduled, heavy)             • model.joblib  • snapshot.json   (per request, fast)        │
+ │   • fetch ~500 tickers          • closes.pkl    • model_history.json   • dashboard/screener  │
+ │   • train + calibrate + score                                          • allocation/stock/plans
+ └─────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - **`marketdesk/`** — Streamlit-free package: `config`, `store` (local **or** S3),
@@ -31,7 +34,8 @@ Lambda:
 - **`api/`** — FastAPI app (`main.py`), Pydantic schemas, Mangum Lambda
   `handler.py`.
 - **`train.py`** — the refresh job (CLI **and** `lambda_handler`).
-- **`Dockerfile` / `Dockerfile.train`** — Lambda container images.
+- **`Dockerfile`** — single Lambda container image. The handler dispatches by
+  event: HTTP requests → FastAPI, EventBridge schedule → the refresh job.
 
 ## What's improved in the ML model (`marketdesk/model.py` + `features.py`)
 
@@ -112,13 +116,13 @@ python train_quant.py --ticker AAPL --period 5y --target logret_5d --optimize --
 
 ## Deploy to AWS — push to `main` → GitHub Actions → SAM
 
-CI/CD is wired: a push to `main` runs the tests, builds both Lambda **container
-images**, and deploys via **AWS SAM** (`template.yaml`). No manual steps, no
+CI/CD is wired: a push to `main` runs the tests, builds the Lambda **container
+image**, and deploys via **AWS SAM** (`template.yaml`). No manual steps, no
 SageMaker.
 
-It provisions: an **S3 artifact bucket**, the **API Lambda** (FastAPI via Mangum,
-public **Function URL**), and the **refresh Lambda** (more memory/timeout, on an
-**EventBridge** weekday schedule) — both sharing the same S3 prefix.
+It provisions: an **S3 artifact bucket** and a single **Lambda** (FastAPI via
+Mangum behind a public **Function URL**, plus an **EventBridge** weekday schedule
+that triggers the refresh job in the same function).
 
 **One-time setup** (repo → Settings → Secrets and variables → Actions). The
 workflow authenticates with static IAM keys (matching the secrets you've set):
@@ -135,11 +139,11 @@ EventBridge, and CloudWatch Logs (SAM creates these resources). For least
 privilege in prod, prefer GitHub OIDC + a scoped deploy role.
 
 After the first deploy, grab the API URL from the workflow log (or
-`sam list stack-outputs`) and set it as `NEXT_PUBLIC_API_BASE_URL` in the UI.
+`sam list stack-outputs`) and set it as the UI's `MARKETDESK_API_UPSTREAM`.
 Deploy locally with `sam build && sam deploy` if you prefer.
 
 **Prefer Terraform?** A full equivalent stack lives in `infra/terraform/`
-(ECR + image build/push, S3, IAM, API + scheduled train Lambda, EventBridge).
+(ECR + image build/push, S3, IAM, one API+refresh Lambda, EventBridge).
 See `infra/terraform/README.md` — `terraform apply -var image_tag=$(git rev-parse --short HEAD)`.
 
 ## Configuration

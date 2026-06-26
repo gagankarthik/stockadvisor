@@ -50,32 +50,12 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  # ---- Fast request path: FastAPI behind a Lambda Function URL ----
+  # ---- Single function: FastAPI behind a Function URL *and* the scheduled
+  # refresh job. The same image carries both code paths; the handler dispatches
+  # by event type (HTTP request vs. EventBridge schedule). Sized for the heavy
+  # training run (memory/timeout) — the fast API requests don't need it, but one
+  # function is simpler to operate than two.
   ApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      PackageType: Image
-      MemorySize: 1536
-      Timeout: 30
-      Policies:
-        - S3CrudPolicy:
-            BucketName: !Ref ArtifactBucket
-      Environment:
-        Variables:
-          MARKETDESK_CORS_ORIGINS: !Sub '["${CorsOrigin}"]'
-      FunctionUrlConfig:
-        AuthType: NONE
-        Cors:
-          AllowOrigins: [!Ref CorsOrigin]
-          AllowMethods: ["*"]
-          AllowHeaders: ["*"]
-    Metadata:
-      Dockerfile: Dockerfile
-      DockerContext: .
-      DockerTag: api
-
-  # ---- Heavy path: scheduled training + snapshot refresh ----
-  TrainFunction:
     Type: AWS::Serverless::Function
     Properties:
       PackageType: Image
@@ -84,6 +64,15 @@ Resources:
       Policies:
         - S3CrudPolicy:
             BucketName: !Ref ArtifactBucket
+      Environment:
+        Variables:
+          MARKETDESK_CORS_ORIGINS: !Sub '["${CorsOrigin}"]'
+      # CORS is handled inside the app (FastAPI CORSMiddleware), so the Function
+      # URL deliberately has no Cors block — configuring it in both places makes
+      # Lambda emit duplicate Access-Control-Allow-Origin headers, which browsers
+      # reject. One source only.
+      FunctionUrlConfig:
+        AuthType: NONE
       Events:
         DailyRefresh:
           Type: Schedule
@@ -92,9 +81,9 @@ Resources:
             Schedule: cron(30 21 ? * MON-FRI *)
             Description: Daily model + market-snapshot refresh
     Metadata:
-      Dockerfile: Dockerfile.train
+      Dockerfile: Dockerfile
       DockerContext: .
-      DockerTag: train
+      DockerTag: api
 
 Outputs:
   ApiUrl:

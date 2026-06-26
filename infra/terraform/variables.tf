@@ -50,13 +50,13 @@ variable "cors_origin" {
 variable "api_memory_mb" {
   type        = number
   default     = 1536
-  description = "Memory for the API Lambda."
+  description = "Deprecated: the API and refresh now share one function sized by train_memory_mb."
 }
 
 variable "train_memory_mb" {
   type        = number
   default     = 3008
-  description = "Memory for the training Lambda."
+  description = "Memory for the combined API + refresh Lambda (sized for the training run)."
 }
 
 variable "refresh_schedule" {
