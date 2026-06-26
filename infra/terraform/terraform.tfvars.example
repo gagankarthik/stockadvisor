@@ -1,0 +1,15 @@
+# Copy to terraform.tfvars and fill in. Do NOT commit the real file.
+region           = "us-east-1"
+project          = "marketdesk"
+
+# Provider keys (kept in state — use a remote encrypted backend in prod).
+finnhub_key      = ""
+alphavantage_key = ""
+openai_api_key   = ""
+
+# Lock CORS to your UI origin in production, e.g. "https://app.example.com".
+cors_origin      = "*"
+
+# Pass a unique tag per deploy on the CLI instead of hardcoding here:
+#   terraform apply -var image_tag=$(git rev-parse --short HEAD)
+# image_tag = "latest"

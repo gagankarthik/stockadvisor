@@ -175,10 +175,10 @@ def create_app() -> FastAPI:
         try:
             hist = prices.ticker_history(ticker, period, interval)
             history = [
-                {"date": str(idx.date()), "open": float(r["Open"]),
+                {"date": idx.isoformat(), "open": float(r["Open"]),
                  "high": float(r["High"]), "low": float(r["Low"]),
                  "close": float(r["Close"]), "volume": int(r.get("Volume", 0) or 0)}
-                for idx, r in hist.tail(400).iterrows()
+                for idx, r in hist.tail(600).iterrows()
             ]
         except Exception:
             history = []

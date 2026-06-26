@@ -120,18 +120,27 @@ It provisions: an **S3 artifact bucket**, the **API Lambda** (FastAPI via Mangum
 public **Function URL**), and the **refresh Lambda** (more memory/timeout, on an
 **EventBridge** weekday schedule) — both sharing the same S3 prefix.
 
-**One-time setup** (repo → Settings → Secrets and variables → Actions):
+**One-time setup** (repo → Settings → Secrets and variables → Actions). The
+workflow authenticates with static IAM keys (matching the secrets you've set):
 
 | Kind | Name | Value |
 |---|---|---|
-| Variable | `AWS_REGION` | e.g. `us-east-1` |
-| Variable | `CORS_ORIGIN` | your UI origin (or `*`) |
-| Secret | `AWS_DEPLOY_ROLE_ARN` | IAM role ARN trusted by GitHub OIDC |
+| Secret | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | IAM user keys for the deploy |
+| Secret | `AWS_REGION` | e.g. `us-east-1` |
 | Secret | `FINNHUB_KEY` / `ALPHAVANTAGE_KEY` / `OPENAI_API_KEY` | provider keys |
+| Variable | `CORS_ORIGIN` *(optional)* | your UI origin (defaults to `*`) |
+
+The IAM user needs permissions for CloudFormation, ECR, Lambda, S3, IAM,
+EventBridge, and CloudWatch Logs (SAM creates these resources). For least
+privilege in prod, prefer GitHub OIDC + a scoped deploy role.
 
 After the first deploy, grab the API URL from the workflow log (or
 `sam list stack-outputs`) and set it as `NEXT_PUBLIC_API_BASE_URL` in the UI.
 Deploy locally with `sam build && sam deploy` if you prefer.
+
+**Prefer Terraform?** A full equivalent stack lives in `infra/terraform/`
+(ECR + image build/push, S3, IAM, API + scheduled train Lambda, EventBridge).
+See `infra/terraform/README.md` — `terraform apply -var image_tag=$(git rev-parse --short HEAD)`.
 
 ## Configuration
 

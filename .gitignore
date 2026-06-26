@@ -8,3 +8,11 @@ __pycache__/
 *.joblib
 *.pkl
 
+# Terraform (never commit the provider cache / state — providers are huge)
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+.aws-sam/
+

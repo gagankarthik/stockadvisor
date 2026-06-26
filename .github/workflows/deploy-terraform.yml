@@ -1,0 +1,76 @@
+name: Deploy to AWS (Terraform)
+
+# Alternative to the SAM workflow, using the same AWS keys + Terraform in
+# infra/terraform. Manual-trigger only so it never double-deploys alongside the
+# SAM workflow — pick ONE path and disable the other.
+on:
+  workflow_dispatch:
+    inputs:
+      destroy:
+        description: "Set to 'true' to tear the stack down instead of deploying"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+env:
+  # Terraform reads these as variable values (var.region, var.finnhub_key, ...).
+  TF_VAR_region: ${{ secrets.AWS_REGION }}
+  TF_VAR_finnhub_key: ${{ secrets.FINNHUB_KEY }}
+  TF_VAR_alphavantage_key: ${{ secrets.ALPHAVANTAGE_KEY }}
+  TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+  TF_VAR_cors_origin: ${{ vars.CORS_ORIGIN || '*' }}
+  TF_VAR_image_tag: ${{ github.sha }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - run: pytest -q
+
+  terraform:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform plan
+        if: ${{ github.event.inputs.destroy != 'true' }}
+        run: terraform plan -input=false
+
+      - name: Terraform apply
+        if: ${{ github.event.inputs.destroy != 'true' }}
+        run: terraform apply -auto-approve -input=false
+
+      - name: Terraform destroy
+        if: ${{ github.event.inputs.destroy == 'true' }}
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Show API URL
+        if: ${{ github.event.inputs.destroy != 'true' }}
+        run: terraform output -raw api_url
