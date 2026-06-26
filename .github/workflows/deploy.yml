@@ -44,12 +44,30 @@ jobs:
       - name: SAM build
         run: sam build
 
+      # SAM's --resolve-s3 doesn't reliably provision a bucket for image-type
+      # stacks, so create a deterministic deployment bucket ourselves (idempotent)
+      # and pass it via --s3-bucket.
+      - name: Ensure SAM deployment bucket
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="marketdesk-sam-deploy-${ACCOUNT}-${AWS_REGION}"
+          echo "DEPLOY_BUCKET=$BUCKET" >> "$GITHUB_ENV"
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            echo "Deployment bucket $BUCKET already exists."
+          elif [ "$AWS_REGION" = "us-east-1" ]; then
+            aws s3api create-bucket --bucket "$BUCKET"
+          else
+            aws s3api create-bucket --bucket "$BUCKET" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
+          fi
+
       - name: SAM deploy
         run: |
           sam deploy \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --resolve-s3 \
+            --s3-bucket "$DEPLOY_BUCKET" \
+            --s3-prefix marketdesk \
             --resolve-image-repos \
             --capabilities CAPABILITY_IAM \
             --parameter-overrides \

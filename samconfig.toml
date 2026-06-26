@@ -4,7 +4,8 @@ version = 0.1
 
 [default.deploy.parameters]
 stack_name = "marketdesk"
-resolve_s3 = true            # SAM manages the deployment artifact bucket
+# Deployment bucket is created/passed explicitly by CI (--s3-bucket); do not set
+# resolve_s3 here or SAM errors on "--s3-bucket and --resolve-s3 are mutually exclusive".
 resolve_image_repos = true   # SAM creates/uses ECR repos for the images
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
