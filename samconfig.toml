@@ -1,0 +1,10 @@
+# Defaults for `sam deploy`. The GitHub Actions workflow passes secrets via
+# --parameter-overrides; locally you can run `sam deploy` and these apply.
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "marketdesk"
+resolve_s3 = true            # SAM manages the deployment artifact bucket
+resolve_image_repos = true   # SAM creates/uses ECR repos for the images
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false

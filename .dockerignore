@@ -1,0 +1,16 @@
+.venv/
+.git/
+.github/
+.cache/
+.artifacts/
+__pycache__/
+*.pyc
+.streamlit/
+.env
+tests/
+legacy/
+*.md
+.pytest_cache/
+.aws-sam/
+samconfig.toml
+template.yaml

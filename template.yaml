@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  MarketDesk — serverless deployment. Two Lambda container images sharing one
+  S3 artifact store: a fast API (FastAPI via Mangum, behind a Function URL) and
+  a scheduled refresh job that trains the model and writes the daily snapshot.
+
+Parameters:
+  FinnhubKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Finnhub API key.
+  AlphaVantageKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Alpha Vantage API key.
+  OpenAIKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: OpenAI API key (for sentiment/narrative features).
+  CorsOrigin:
+    Type: String
+    Default: "*"
+    Description: Allowed CORS origin for the API (set to your UI domain in prod).
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        MARKETDESK_ARTIFACT_URI: !Sub "s3://${ArtifactBucket}/prod"
+        FINNHUB_KEY: !Ref FinnhubKey
+        ALPHAVANTAGE_KEY: !Ref AlphaVantageKey
+        OPENAI_API_KEY: !Ref OpenAIKey
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ---- Fast request path: FastAPI behind a Lambda Function URL ----
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      MemorySize: 1536
+      Timeout: 30
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ArtifactBucket
+      Environment:
+        Variables:
+          MARKETDESK_CORS_ORIGINS: !Sub '["${CorsOrigin}"]'
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: [!Ref CorsOrigin]
+          AllowMethods: ["*"]
+          AllowHeaders: ["*"]
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: .
+      DockerTag: api
+
+  # ---- Heavy path: scheduled training + snapshot refresh ----
+  TrainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      MemorySize: 3008
+      Timeout: 900
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ArtifactBucket
+      Events:
+        DailyRefresh:
+          Type: Schedule
+          Properties:
+            # ~30 min after the US close (21:30 UTC), weekdays
+            Schedule: cron(30 21 ? * MON-FRI *)
+            Description: Daily model + market-snapshot refresh
+    Metadata:
+      Dockerfile: Dockerfile.train
+      DockerContext: .
+      DockerTag: train
+
+Outputs:
+  ApiUrl:
+    Description: Public API base URL — set this as NEXT_PUBLIC_API_BASE_URL in the UI.
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  ArtifactBucketName:
+    Description: S3 bucket holding the model + snapshot.
+    Value: !Ref ArtifactBucket
