@@ -23,6 +23,7 @@ from marketdesk.service import (SNAPSHOT_KEY, allocation_from_snapshot,
                                 build_snapshot, load_closes, score_snapshot)
 from marketdesk.store import ArtifactStore, build_store
 from marketdesk import plans as plans_mod
+from marketdesk import insight as insight_mod
 
 from . import schemas
 
@@ -206,6 +207,29 @@ def create_app() -> FastAPI:
             snap, closes, req.amount, req.profile, req.n_picks,
             req.adaptive, req.use_ml, settings)
         return _clean({"amount": req.amount, "profile": req.profile, **result})
+
+    @app.get("/insight/market", tags=["insight"])
+    def market_insight():
+        """Risk-first natural-language read of the current market snapshot.
+
+        Powered by OpenAI when a key is configured; otherwise a deterministic
+        summary built from the same numbers. Cached per data date."""
+        snap = _require_snapshot()
+        return _clean(insight_mod.market_brief(snap, settings, store))
+
+    @app.get("/insight/stock/{ticker}", tags=["insight"])
+    def stock_insight(ticker: str):
+        """Risk-first thesis for one ticker, grounded in its snapshot scores."""
+        ticker = ticker.upper().strip()
+        if not alphavantage.valid_symbol(ticker):
+            raise HTTPException(400, "Invalid ticker symbol.")
+        snap = store.get_json(SNAPSHOT_KEY) or {}
+        scored = score_snapshot(snap, settings=settings) if snap.get("stocks") else None
+        if scored is None or ticker not in scored.index:
+            raise HTTPException(404, f"{ticker} is not in the current snapshot universe.")
+        row = _row_to_stock(ticker, scored.loc[ticker].to_dict())
+        return _clean(insight_mod.stock_brief(
+            ticker, row, settings, store, data_through=snap.get("data_through")))
 
     @app.get("/model", response_model=schemas.ModelCardOut, tags=["model"])
     def model_card():

@@ -27,9 +27,13 @@ class Settings(BaseSettings):
     # ---- Provider credentials (unprefixed, matching the old secrets names) ----
     finnhub_key: str = Field(default="", validation_alias="FINNHUB_KEY")
     alphavantage_key: str = Field(default="", validation_alias="ALPHAVANTAGE_KEY")
-    # OpenAI key (e.g. for news-sentiment / narrative features). Read straight
-    # from OPENAI_API_KEY so the same value works locally and in Lambda.
+    # OpenAI key (powers the narrative "desk note" layer). Read straight from
+    # OPENAI_API_KEY so the same value works locally and in Lambda. When unset,
+    # the insight endpoints fall back to a deterministic numeric summary.
     openai_api_key: str = Field(default="", validation_alias="OPENAI_API_KEY")
+    # Which OpenAI chat model to use for narrative generation. gpt-4o-mini is the
+    # cost/quality default; override with OPENAI_MODEL.
+    openai_model: str = Field(default="gpt-4o-mini", validation_alias="OPENAI_MODEL")
 
     # ---- Storage (local path or s3://bucket/prefix) ----
     # Where trained model artifacts and the daily market snapshot live. The API
